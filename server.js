@@ -1,9 +1,10 @@
 const express=require('express'),http=require('http'),{Pool}=require('pg'),bcrypt=require('bcryptjs'),jwt=require('jsonwebtoken'),{Server}=require('socket.io');
 const SECRET=process.env.JWT_SECRET;
-if(!SECRET||SECRET.length<16){console.error('Set JWT_SECRET (16+ chars) in .env');process.exit(1)}
-if(!process.env.DATABASE_URL){console.error('Set DATABASE_URL in .env');process.exit(1)}
+const ON_VERCEL=!!process.env.VERCEL;
+if(!SECRET||SECRET.length<16){console.error('Set JWT_SECRET (16+ chars) in .env');if(!ON_VERCEL)process.exit(1)}
+if(!process.env.DATABASE_URL){console.error('Set DATABASE_URL in .env');if(!ON_VERCEL)process.exit(1)}
 
-const app=express(),srv=http.createServer(app),io=new Server(srv),db=new Pool({connectionString:process.env.DATABASE_URL});
+const app=express(),srv=http.createServer(app),io=new Server(srv),db=new Pool({connectionString:process.env.DATABASE_URL,max:ON_VERCEL?3:10,ssl:process.env.DATABASE_URL&&!/localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL)?{rejectUnauthorized:false}:undefined});
 db.on('error',er=>console.error('Unexpected PostgreSQL pool error:',er));
 const query=(text,values=[],client=db)=>client.query(text,values);
 const one=async(text,values=[],client=db)=>(await query(text,values,client)).rows[0];
@@ -38,8 +39,11 @@ const who=q=>{try{const c=(q.headers.cookie||'').split(';').map(x=>x.trim()).fin
 const auth=(q,s,n)=>{q.user=who(q);q.user?n():s.status(401).json({error:'Login required'})};
 const rd=b=>{const n=str(b.name,60),x=Number(b.max_marks),st=b.status==='completed'?'completed':'active';need(n&&Number.isFinite(x)&&x>0,'Round name and a maximum above 0 are required');return[n,x,st]};
 
+
 app.use(express.json({limit:'5mb'}));app.use(express.static('public'));
 const fails={};
+let ready;
+if(ON_VERCEL)app.use('/api',(q,s,n)=>{(ready||(ready=init().catch(e=>{ready=null;throw e}))).then(()=>n(),n)});
 app.post('/api/login',route(async(q,s)=>{const k=q.ip,f=fails[k]||{n:0,t:Date.now()};if(Date.now()-f.t>9e5){f.n=0;f.t=Date.now()}
   if(f.n>=10)return s.status(429).json({error:'Too many attempts. Try again later.'});
   const u=await one('select * from admins where username=$1',[str(q.body.username)]);
@@ -104,12 +108,12 @@ app.post('/api/reset',auth,route(async(q,s)=>{need(q.body.confirm==='RESET','Con
 app.use('/api',(q,s)=>s.status(404).json({error:'Not found'}));
 app.use((er,q,s,n)=>{const unique=er.code==='23505';if(!unique&&!er.status)console.error(er);s.status(unique?409:er.status||500).json({error:unique?'That value already exists':er.status?er.message:'Server error'})});
 
-async function start(){
-  try{
-    await query('select 1');
-    if(process.env.ADMIN_USER&&process.env.ADMIN_PASSWORD)await query('insert into admins(username,pass_hash) values($1,$2) on conflict(username) do update set pass_hash=excluded.pass_hash',[process.env.ADMIN_USER,bcrypt.hashSync(process.env.ADMIN_PASSWORD,12)]);
-    else if(!await one('select 1 from admins'))console.warn('No admin exists: set ADMIN_USER and ADMIN_PASSWORD in .env');
-    const port=process.env.PORT||3000;srv.listen(port,()=>console.log('SYNTRIX running on port '+port));
-  }catch(er){console.error('Could not connect to Supabase PostgreSQL or find its schema; check DATABASE_URL and run sql.md:',er);process.exit(1)}
+async function init(){
+  await query('select 1');
+  if(process.env.ADMIN_USER&&process.env.ADMIN_PASSWORD)await query('insert into admins(username,pass_hash) values($1,$2) on conflict(username) do update set pass_hash=excluded.pass_hash',[process.env.ADMIN_USER,bcrypt.hashSync(process.env.ADMIN_PASSWORD,ON_VERCEL?10:12)]);
+  else if(!await one('select 1 from admins'))console.warn('No admin exists: set ADMIN_USER and ADMIN_PASSWORD in .env');
 }
-start();
+if(!ON_VERCEL){
+  (async()=>{try{await init();const port=process.env.PORT||3000;srv.listen(port,()=>console.log('SYNTRIX running on port '+port))}catch(er){console.error('Could not connect to Supabase PostgreSQL or find its schema; check DATABASE_URL and run sql.md:',er);process.exit(1)}})();
+}
+module.exports=app;

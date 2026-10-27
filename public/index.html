@@ -78,5 +78,5 @@ if(ADM.includes(p)&&!S.me){location.hash='#/login';return}
 $('#nav').innerHTML=`<a class="keep ${p===''?'on':''}" href="#/">Dashboard</a>${S.me?['teams','rounds','marks'].map(x=>`<a class="${p===x?'on':''}" href="#/${x}">${x[0].toUpperCase()+x.slice(1)}</a>`).join(''):''}<a class="keep ${p==='board'?'on':''}" href="#/board">Leaderboard</a><a class="${p==='results'?'on':''}" href="#/results">Results</a>${S.me?'<a href="#" onclick="logout();return false">Logout</a>':`<a class="${p==='login'?'on':''}" href="#/login">Admin</a>`}`;
 $('#app').innerHTML=(P[p]||home)();if(p==='marks'){stat();hist()}}
 addEventListener('hashchange',()=>render());
-const sk=io();sk.on('update',()=>load());sk.on('connect',()=>load());setInterval(()=>load(),15000);load(1);
+if(window.io){const sk=io();sk.on('update',()=>load());sk.on('connect',()=>load())}setInterval(()=>load(),window.io?15000:5000);load(1);
 </script></body></html>
