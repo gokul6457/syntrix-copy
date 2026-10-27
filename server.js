@@ -4,7 +4,9 @@ const ON_VERCEL=!!process.env.VERCEL;
 if(!SECRET||SECRET.length<16){console.error('Set JWT_SECRET (16+ chars) in .env');if(!ON_VERCEL)process.exit(1)}
 if(!process.env.DATABASE_URL){console.error('Set DATABASE_URL in .env');if(!ON_VERCEL)process.exit(1)}
 
-const app=express(),srv=http.createServer(app),io=new Server(srv),db=new Pool({connectionString:process.env.DATABASE_URL,max:ON_VERCEL?3:10,ssl:process.env.DATABASE_URL&&!/localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL)?{rejectUnauthorized:false}:undefined});
+let databaseUrl=process.env.DATABASE_URL;
+if(databaseUrl){const url=new URL(databaseUrl);url.searchParams.delete('sslmode');databaseUrl=url.toString()}
+const app=express(),srv=http.createServer(app),io=new Server(srv),db=new Pool({connectionString:databaseUrl,max:ON_VERCEL?3:10,ssl:databaseUrl&&!/localhost|127\.0\.0\.1/.test(databaseUrl)?{rejectUnauthorized:false}:undefined});
 db.on('error',er=>console.error('Unexpected PostgreSQL pool error:',er));
 const query=(text,values=[],client=db)=>client.query(text,values);
 const one=async(text,values=[],client=db)=>(await query(text,values,client)).rows[0];
